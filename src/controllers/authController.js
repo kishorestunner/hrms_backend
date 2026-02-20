@@ -7,7 +7,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     const result = await pool.query(
-      "SELECT * FROM employees WHERE email=$1",
+      "SELECT * FROM employees WHERE email = $1",
       [email]
     );
 
