@@ -1,4 +1,6 @@
 const pool = require("../db/db");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 // 🔹 Generate Employee ID
 const generateEmployeeId = () => {
@@ -25,12 +27,15 @@ exports.addEmployee = async (req, res) => {
 
     const employeeId = generateEmployeeId();
 
+    // 🔐 Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const result = await pool.query(
       `INSERT INTO employees 
        (employee_id, name, email, position, salary, password) 
        VALUES ($1,$2,$3,$4,$5,$6) 
        RETURNING *`,
-      [employeeId, name, email, position, salary, password]
+      [employeeId, name, email, position, salary, hashedPassword]
     );
 
     res.json(result.rows[0]);
