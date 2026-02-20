@@ -13,9 +13,27 @@ exports.getEmployees = async (req, res) => {
     const result = await pool.query(
       "SELECT id, employee_id, name, email, role, position, salary FROM employees ORDER BY id ASC"
     );
-
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
+// Get single employee by ID
+exports.getEmployeeById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      "SELECT id, employee_id, name, email, role, position, salary FROM employees WHERE id = $1",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Employee not found" });
+    }
+
+    res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -38,7 +56,6 @@ exports.addEmployee = async (req, res) => {
     );
 
     res.json(result.rows[0]);
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
