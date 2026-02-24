@@ -8,13 +8,13 @@ exports.createProject = async (req, res) => {
       description,
       client_name,
       budget,
-      status
+      status,
     } = req.body;
 
     const result = await pool.query(
       `INSERT INTO projects
        (project_name, description, client_name, budget, status, progress, start_date, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
        RETURNING *`,
       [
         project_name,
@@ -23,12 +23,13 @@ exports.createProject = async (req, res) => {
         budget,
         status || "Not Started",
         0,
-        req.user.id
+        req.user.id,
       ]
     );
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    console.error("Create Project Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -37,19 +38,36 @@ exports.createProject = async (req, res) => {
 exports.updateProject = async (req, res) => {
   try {
     const { id } = req.params;
-    let { project_name, description, client_name, budget, status, progress } =
-      req.body;
 
+    let {
+      project_name,
+      description,
+      client_name,
+      budget,
+      status,
+      progress,
+    } = req.body;
+
+    // Business rules
     if (status === "Not Started") progress = 0;
     if (status === "Ongoing" && (!progress || progress <= 0)) progress = 10;
     if (status === "Completed") progress = 100;
 
     const result = await pool.query(
       `UPDATE projects
-       SET project_name=$1, description=$2, client_name=$3,
-           budget=$4, status=$5, progress=$6,
-           end_date = CASE WHEN $5='Completed' THEN NOW() ELSE end_date END
-       WHERE id=$7
+       SET
+         project_name = COALESCE($1, project_name),
+         description  = COALESCE($2, description),
+         client_name  = COALESCE($3, client_name),
+         budget       = COALESCE($4, budget),
+         status       = COALESCE($5, status),
+         progress     = COALESCE($6, progress),
+         end_date     = CASE
+                          WHEN COALESCE($5, status) = 'Completed'
+                          THEN NOW()
+                          ELSE end_date
+                        END
+       WHERE id = $7
        RETURNING *`,
       [
         project_name,
@@ -58,15 +76,17 @@ exports.updateProject = async (req, res) => {
         budget,
         status,
         progress,
-        id
+        id,
       ]
     );
 
-    if (result.rows.length === 0)
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: "Project not found" });
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
+    console.error("Update Project Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -77,13 +97,22 @@ exports.deleteProject = async (req, res) => {
     const { id } = req.params;
 
     await pool.query(
-      "DELETE FROM project_employees WHERE project_id=$1",
+      "DELETE FROM project_employees WHERE project_id = $1",
       [id]
     );
-    await pool.query("DELETE FROM projects WHERE id=$1", [id]);
 
-    res.json({ message: "Project deleted" });
+    const result = await pool.query(
+      "DELETE FROM projects WHERE id = $1 RETURNING *",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    res.json({ message: "Project deleted successfully" });
   } catch (err) {
+    console.error("Delete Project Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -95,7 +124,7 @@ exports.assignEmployeeToProject = async (req, res) => {
 
     const exists = await pool.query(
       `SELECT 1 FROM project_employees
-       WHERE project_id=$1 AND employee_id=$2`,
+       WHERE project_id = $1 AND employee_id = $2`,
       [project_id, employee_id]
     );
 
@@ -105,12 +134,13 @@ exports.assignEmployeeToProject = async (req, res) => {
 
     await pool.query(
       `INSERT INTO project_employees (project_id, employee_id)
-       VALUES ($1,$2)`,
+       VALUES ($1, $2)`,
       [project_id, employee_id]
     );
 
-    res.json({ message: "Employee assigned" });
+    res.json({ message: "Employee assigned successfully" });
   } catch (err) {
+    console.error("Assign Employee Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -122,12 +152,13 @@ exports.removeEmployeeFromProject = async (req, res) => {
 
     await pool.query(
       `DELETE FROM project_employees
-       WHERE project_id=$1 AND employee_id=$2`,
+       WHERE project_id = $1 AND employee_id = $2`,
       [projectId, employeeId]
     );
 
-    res.json({ message: "Employee removed" });
+    res.json({ message: "Employee removed successfully" });
   } catch (err) {
+    console.error("Remove Employee Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -140,6 +171,7 @@ exports.getAllProjects = async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
+    console.error("Get All Projects Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -147,15 +179,17 @@ exports.getAllProjects = async (req, res) => {
 exports.getProjectById = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM projects WHERE id=$1`,
+      `SELECT * FROM projects WHERE id = $1`,
       [req.params.id]
     );
 
-    if (result.rows.length === 0)
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: "Project not found" });
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
+    console.error("Get Project By ID Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -172,6 +206,7 @@ exports.getProjectsByEmployee = async (req, res) => {
 
     res.json(result.rows);
   } catch (err) {
+    console.error("Get Projects By Employee Error:", err);
     res.status(500).json({ error: err.message });
   }
 };

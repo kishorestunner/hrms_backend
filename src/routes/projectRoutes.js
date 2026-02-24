@@ -24,7 +24,12 @@ router.delete(
 );
 
 /* ===== READ ===== */
-router.get("/employee/:employeeId", auth, projectController.getProjectsByEmployee);
+router.get(
+  "/employee/:employeeId",
+  auth,
+  projectController.getProjectsByEmployee
+);
+
 router.get("/", auth, role(["manager"]), projectController.getAllProjects);
 router.get("/:id", auth, projectController.getProjectById);
 
