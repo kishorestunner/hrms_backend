@@ -1,80 +1,176 @@
-exports.updateProject = async (req, res) => {
+const pool = require("../db/db");
+
+/* ================= CREATE PROJECT ================= */
+exports.createProject = async (req, res) => {
   try {
-    const project = await Project.findByPk(req.params.id, {
-      include: ["assigned_employees"],
-    });
-
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
-    }
-
-    let {
+    const {
       project_name,
       description,
       client_name,
       budget,
-      status,
-      progress,
-      assigned_employees,
+      status
     } = req.body;
 
-    /* ================= STATUS ↔ PROGRESS ================= */
+    const result = await pool.query(
+      `INSERT INTO projects
+       (project_name, description, client_name, budget, status, progress, start_date, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7)
+       RETURNING *`,
+      [
+        project_name,
+        description,
+        client_name,
+        budget,
+        status || "Not Started",
+        0,
+        req.user.id
+      ]
+    );
 
-    if (status === "Not Started") {
-      progress = 0;
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* ================= UPDATE PROJECT ================= */
+exports.updateProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let { project_name, description, client_name, budget, status, progress } =
+      req.body;
+
+    if (status === "Not Started") progress = 0;
+    if (status === "Ongoing" && (!progress || progress <= 0)) progress = 10;
+    if (status === "Completed") progress = 100;
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET project_name=$1, description=$2, client_name=$3,
+           budget=$4, status=$5, progress=$6,
+           end_date = CASE WHEN $5='Completed' THEN NOW() ELSE end_date END
+       WHERE id=$7
+       RETURNING *`,
+      [
+        project_name,
+        description,
+        client_name,
+        budget,
+        status,
+        progress,
+        id
+      ]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Project not found" });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* ================= DELETE PROJECT ================= */
+exports.deleteProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await pool.query(
+      "DELETE FROM project_employees WHERE project_id=$1",
+      [id]
+    );
+    await pool.query("DELETE FROM projects WHERE id=$1", [id]);
+
+    res.json({ message: "Project deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* ================= ASSIGN EMPLOYEE ================= */
+exports.assignEmployeeToProject = async (req, res) => {
+  try {
+    const { project_id, employee_id } = req.body;
+
+    const exists = await pool.query(
+      `SELECT 1 FROM project_employees
+       WHERE project_id=$1 AND employee_id=$2`,
+      [project_id, employee_id]
+    );
+
+    if (exists.rows.length > 0) {
+      return res.status(400).json({ error: "Employee already assigned" });
     }
 
-    if (status === "Ongoing") {
-      if (progress <= 0 || progress >= 100) {
-        progress = 10; // default ongoing progress
-      }
-    }
+    await pool.query(
+      `INSERT INTO project_employees (project_id, employee_id)
+       VALUES ($1,$2)`,
+      [project_id, employee_id]
+    );
 
-    if (status === "Completed") {
-      progress = 100;
-      project.end_date = new Date(); // auto end date
-    }
+    res.json({ message: "Employee assigned" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
-    /* ================= START DATE ================= */
+/* ================= REMOVE EMPLOYEE ================= */
+exports.removeEmployeeFromProject = async (req, res) => {
+  try {
+    const { projectId, employeeId } = req.params;
 
-    if (!project.start_date) {
-      project.start_date = project.created_at;
-    }
+    await pool.query(
+      `DELETE FROM project_employees
+       WHERE project_id=$1 AND employee_id=$2`,
+      [projectId, employeeId]
+    );
 
-    /* ================= UPDATE PROJECT ================= */
+    res.json({ message: "Employee removed" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
-    await project.update({
-      project_name,
-      description,
-      client_name,
-      budget,
-      status,
-      progress,
-    });
+/* ================= GET PROJECTS ================= */
+exports.getAllProjects = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM projects ORDER BY id DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
-    /* ================= EMPLOYEE ASSIGNMENT ================= */
+exports.getProjectById = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM projects WHERE id=$1`,
+      [req.params.id]
+    );
 
-    if (Array.isArray(assigned_employees)) {
-      // remove existing
-      await ProjectEmployee.destroy({
-        where: { project_id: project.id },
-      });
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Project not found" });
 
-      // add unique employees only
-      const uniqueEmployees = [...new Set(assigned_employees)];
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
-      for (const empId of uniqueEmployees) {
-        await ProjectEmployee.create({
-          project_id: project.id,
-          employee_id: empId,
-        });
-      }
-    }
+exports.getProjectsByEmployee = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT p.*
+       FROM projects p
+       JOIN project_employees pe ON pe.project_id = p.id
+       WHERE pe.employee_id = $1`,
+      [req.params.employeeId]
+    );
 
-    res.json({
-      message: "Project updated successfully",
-      project,
-    });
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
