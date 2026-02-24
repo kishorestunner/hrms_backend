@@ -1,6 +1,8 @@
 const pool = require("../db/db");
 
-/* CREATE PROJECT */
+/* =========================================================
+   CREATE PROJECT
+   ========================================================= */
 exports.createProject = async (req, res) => {
   const client = await pool.connect();
 
@@ -25,10 +27,12 @@ exports.createProject = async (req, res) => {
     const created_by = req.user.id;
 
     const projectResult = await client.query(
-      `INSERT INTO projects
-       (project_name, description, client_name, start_date, end_date, budget, status, progress, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING *`,
+      `
+      INSERT INTO projects
+      (project_name, description, client_name, start_date, end_date, budget, status, progress, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *
+      `,
       [
         project_name,
         description || null,
@@ -44,15 +48,18 @@ exports.createProject = async (req, res) => {
 
     const project = projectResult.rows[0];
 
-    // Assign creator as Manager automatically
+    // Auto assign creator as Manager
     await client.query(
-      `INSERT INTO project_employees (project_id, employee_id, role_in_project)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (project_id, employee_id) DO NOTHING`,
-      [project.id, created_by, "Manager"]
+      `
+      INSERT INTO project_employees (project_id, employee_id, role_in_project)
+      VALUES ($1,$2,'Manager')
+      ON CONFLICT (project_id, employee_id) DO NOTHING
+      `,
+      [project.id, created_by]
     );
 
     await client.query("COMMIT");
+
     res.status(201).json(project);
 
   } catch (err) {
@@ -64,15 +71,19 @@ exports.createProject = async (req, res) => {
 };
 
 
-/* ASSIGN EMPLOYEE */
+/* =========================================================
+   ASSIGN EMPLOYEE TO PROJECT
+   ========================================================= */
 exports.assignEmployeeToProject = async (req, res) => {
   const { project_id, employee_id, role_in_project } = req.body;
 
   try {
     await pool.query(
-      `INSERT INTO project_employees (project_id, employee_id, role_in_project)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (project_id, employee_id) DO NOTHING`,
+      `
+      INSERT INTO project_employees (project_id, employee_id, role_in_project)
+      VALUES ($1,$2,$3)
+      ON CONFLICT (project_id, employee_id) DO NOTHING
+      `,
       [project_id, employee_id, role_in_project || "Member"]
     );
 
@@ -84,7 +95,31 @@ exports.assignEmployeeToProject = async (req, res) => {
 };
 
 
-/* GET PROJECTS BY EMPLOYEE (FIXED) */
+/* =========================================================
+   REMOVE EMPLOYEE FROM PROJECT
+   ========================================================= */
+exports.removeEmployeeFromProject = async (req, res) => {
+  const { projectId, employeeId } = req.params;
+
+  try {
+    await pool.query(
+      `DELETE FROM project_employees 
+       WHERE project_id = $1 AND employee_id = $2`,
+      [projectId, employeeId]
+    );
+
+    res.json({ message: "Employee removed successfully" });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+/* =========================================================
+   GET PROJECTS BY EMPLOYEE (Employee Login)
+   Shows ONLY assigned projects
+   ========================================================= */
 exports.getProjectsByEmployee = async (req, res) => {
   const { employeeId } = req.params;
 
@@ -99,13 +134,17 @@ exports.getProjectsByEmployee = async (req, res) => {
         p.status,
         p.budget,
         p.progress,
+        p.created_by,
 
-        json_agg(
-          json_build_object(
-            'employee_id', e.id,
-            'employee_name', e.name,
-            'role', pe.role_in_project
-          )
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'employee_id', e.id,
+              'employee_name', e.name,
+              'role', pe.role_in_project
+            )
+          ) FILTER (WHERE e.id IS NOT NULL),
+          '[]'
         ) AS assigned_employees
 
       FROM projects p
@@ -132,26 +171,71 @@ exports.getProjectsByEmployee = async (req, res) => {
 };
 
 
-/* GET ALL PROJECTS */
+/* =========================================================
+   GET ALL PROJECTS (Manager Login)
+   Shows ALL projects with assigned employees
+   ========================================================= */
 exports.getAllProjects = async (req, res) => {
-  const result = await pool.query("SELECT * FROM projects ORDER BY id DESC");
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        p.id,
+        p.project_name,
+        p.description,
+        p.client_name,
+        p.status,
+        p.budget,
+        p.progress,
+        p.created_by,
+
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object(
+              'employee_id', e.id,
+              'employee_name', e.name,
+              'role', pe.role_in_project
+            )
+          ) FILTER (WHERE e.id IS NOT NULL),
+          '[]'
+        ) AS assigned_employees
+
+      FROM projects p
+      LEFT JOIN project_employees pe ON pe.project_id = p.id
+      LEFT JOIN employees e ON e.id = pe.employee_id
+
+      GROUP BY p.id
+      ORDER BY p.id DESC
+      `
+    );
+
+    res.json(result.rows);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 
-/* GET PROJECT BY ID (IMPROVED) */
+/* =========================================================
+   GET PROJECT BY ID
+   ========================================================= */
 exports.getProjectById = async (req, res) => {
   try {
     const result = await pool.query(
       `
       SELECT 
         p.*,
-        json_agg(
-          json_build_object(
-            'employee_id', e.id,
-            'employee_name', e.name,
-            'role', pe.role_in_project
-          )
+
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'employee_id', e.id,
+              'employee_name', e.name,
+              'role', pe.role_in_project
+            )
+          ) FILTER (WHERE e.id IS NOT NULL),
+          '[]'
         ) AS assigned_employees
 
       FROM projects p
@@ -163,8 +247,9 @@ exports.getProjectById = async (req, res) => {
       [req.params.id]
     );
 
-    if (!result.rows.length)
+    if (!result.rows.length) {
       return res.status(404).json({ message: "Project not found" });
+    }
 
     res.json(result.rows[0]);
 
@@ -174,21 +259,45 @@ exports.getProjectById = async (req, res) => {
 };
 
 
-/* UPDATE PROJECT */
+/* =========================================================
+   UPDATE PROJECT
+   ========================================================= */
 exports.updateProject = async (req, res) => {
   const { id } = req.params;
 
-  const result = await pool.query(
-    `UPDATE projects SET status=$1, progress=$2 WHERE id=$3 RETURNING *`,
-    [req.body.status, req.body.progress, id]
-  );
+  try {
+    const result = await pool.query(
+      `
+      UPDATE projects
+      SET status = $1,
+          progress = $2
+      WHERE id = $3
+      RETURNING *
+      `,
+      [req.body.status, req.body.progress, id]
+    );
 
-  res.json(result.rows[0]);
+    res.json(result.rows[0]);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 
-/* DELETE PROJECT */
+/* =========================================================
+   DELETE PROJECT
+   ========================================================= */
 exports.deleteProject = async (req, res) => {
-  await pool.query("DELETE FROM projects WHERE id=$1", [req.params.id]);
-  res.json({ message: "Project deleted" });
+  try {
+    await pool.query(
+      `DELETE FROM projects WHERE id = $1`,
+      [req.params.id]
+    );
+
+    res.json({ message: "Project deleted successfully" });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
