@@ -48,7 +48,6 @@ exports.updateProject = async (req, res) => {
       progress,
     } = req.body;
 
-    // Business rules
     if (status === "Not Started") progress = 0;
     if (status === "Ongoing" && (!progress || progress <= 0)) progress = 10;
     if (status === "Completed") progress = 100;
@@ -163,12 +162,28 @@ exports.removeEmployeeFromProject = async (req, res) => {
   }
 };
 
-/* ================= GET PROJECTS ================= */
+/* ================= GET ALL PROJECTS (FIXED) ================= */
 exports.getAllProjects = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM projects ORDER BY id DESC`
-    );
+    const result = await pool.query(`
+      SELECT
+        p.*,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', e.id,
+              'name', e.name
+            )
+          ) FILTER (WHERE e.id IS NOT NULL),
+          '[]'
+        ) AS employees
+      FROM projects p
+      LEFT JOIN project_employees pe ON pe.project_id = p.id
+      LEFT JOIN employees e ON e.id = pe.employee_id
+      GROUP BY p.id
+      ORDER BY p.id DESC
+    `);
+
     res.json(result.rows);
   } catch (err) {
     console.error("Get All Projects Error:", err);
@@ -176,6 +191,7 @@ exports.getAllProjects = async (req, res) => {
   }
 };
 
+/* ================= GET PROJECT BY ID ================= */
 exports.getProjectById = async (req, res) => {
   try {
     const result = await pool.query(
@@ -194,15 +210,28 @@ exports.getProjectById = async (req, res) => {
   }
 };
 
+/* ================= GET PROJECTS BY EMPLOYEE ================= */
 exports.getProjectsByEmployee = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT p.*
-       FROM projects p
-       JOIN project_employees pe ON pe.project_id = p.id
-       WHERE pe.employee_id = $1`,
-      [req.params.employeeId]
-    );
+    const result = await pool.query(`
+      SELECT
+        p.*,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', e.id,
+              'name', e.name
+            )
+          ) FILTER (WHERE e.id IS NOT NULL),
+          '[]'
+        ) AS employees
+      FROM projects p
+      JOIN project_employees pe ON pe.project_id = p.id
+      LEFT JOIN employees e ON e.id = pe.employee_id
+      WHERE pe.employee_id = $1
+      GROUP BY p.id
+      ORDER BY p.id DESC
+    `, [req.params.employeeId]);
 
     res.json(result.rows);
   } catch (err) {
