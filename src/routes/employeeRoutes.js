@@ -9,7 +9,7 @@ router.get("/", auth, employeeController.getEmployees);
 router.get("/:id", auth, employeeController.getEmployeeById);
 
 // 🔒 Admin only
-router.post("/", auth, role(["admin"]), employeeController.addEmployee);
+router.post("/", auth, role(["manager"]), employeeController.addEmployee);
 
 // 🔒 Admin + Manager
 router.put("/:id", auth, role(["admin", "manager"]), employeeController.updateEmployee);

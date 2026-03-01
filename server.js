@@ -5,6 +5,7 @@ require("dotenv").config();
 const employeeRoutes = require("./src/routes/employeeRoutes");
 const authRoutes = require("./src/routes/authRoutes");
 const projectRoutes = require("./src/routes/projectRoutes");
+const attendanceRoutes = require("./src/routes/attendanceRoutes"); // ✅ ADD THIS
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.get("/", (req, res) => {
 app.use("/employees", employeeRoutes);
 app.use("/auth", authRoutes);
 app.use("/projects", projectRoutes);
+app.use("/attendance", attendanceRoutes); // ✅ ADD THIS
 
 const PORT = process.env.PORT || 5000;
 
