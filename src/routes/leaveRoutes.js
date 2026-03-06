@@ -7,6 +7,10 @@ const authMiddleware = require("../middleware/authMiddleware");
 
 router.get("/types", authMiddleware, leaveController.getLeaveTypes);
 
+router.post("/add-balance", authMiddleware, leaveController.addLeaveBalance);
+
+router.put("/update-balance", authMiddleware, leaveController.updateLeaveBalance);
+
 router.get("/balance", authMiddleware, leaveController.getLeaveBalance);
 
 router.post("/apply", authMiddleware, leaveController.applyLeave);
