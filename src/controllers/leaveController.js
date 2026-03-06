@@ -1,6 +1,5 @@
 const pool = require("../db/db");
 
-
 /* ================= GET LEAVE TYPES ================= */
 
 exports.getLeaveTypes = async (req, res) => {
@@ -13,11 +12,13 @@ exports.getLeaveTypes = async (req, res) => {
       ORDER BY id
     `);
 
-    res.status(200).json(result.rows);
+    res.json(result.rows);
 
   } catch (error) {
-    console.error("Get Leave Types Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch leave types" });
+
   }
 };
 
@@ -29,37 +30,26 @@ exports.addLeaveBalance = async (req, res) => {
 
   try {
 
-    const { employee_id, casual, sick, paid, comp, lop } = req.body;
-
-    if (!employee_id) {
-      return res.status(400).json({
-        message: "Employee ID required"
-      });
-    }
+    const { employee_id, casual = 0, sick = 0, paid = 0, comp = 0, lop = 0 } = req.body;
 
     const result = await pool.query(
       `INSERT INTO leave_balance
-       (employee_id, casual, sick, paid, comp, lop)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING *`,
-      [
-        employee_id,
-        casual || 0,
-        sick || 0,
-        paid || 0,
-        comp || 0,
-        lop || 0
-      ]
+      (employee_id, casual, sick, paid, comp, lop)
+      VALUES ($1,$2,$3,$4,$5,$6)
+      RETURNING *`,
+      [employee_id, casual, sick, paid, comp, lop]
     );
 
     res.status(201).json({
-      message: "Leave balance added successfully",
+      message: "Leave balance added",
       data: result.rows[0]
     });
 
   } catch (error) {
-    console.error("Add Leave Balance Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to add leave balance" });
+
   }
 
 };
@@ -86,20 +76,16 @@ exports.updateLeaveBalance = async (req, res) => {
       [casual, sick, paid, comp, lop, employee_id]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        message: "Leave balance not found"
-      });
-    }
-
     res.json({
-      message: "Leave balance updated successfully",
+      message: "Leave balance updated",
       data: result.rows[0]
     });
 
   } catch (error) {
-    console.error("Update Leave Balance Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to update leave balance" });
+
   }
 
 };
@@ -121,17 +107,13 @@ exports.getLeaveBalance = async (req, res) => {
       [employeeId]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        message: "Leave balance not found"
-      });
-    }
-
     res.json(result.rows[0]);
 
   } catch (error) {
-    console.error("Leave Balance Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch leave balance" });
+
   }
 
 };
@@ -148,6 +130,33 @@ exports.applyLeave = async (req, res) => {
 
     const { leave_type_id, from_date, to_date, days, reason } = req.body;
 
+    /* FIND LEAVE COLUMN */
+
+    let column = "";
+
+    if (leave_type_id === 1) column = "casual";
+    if (leave_type_id === 2) column = "sick";
+    if (leave_type_id === 3) column = "paid";
+    if (leave_type_id === 4) column = "comp";
+    if (leave_type_id === 5) column = "lop";
+
+    /* CHECK BALANCE */
+
+    const balanceResult = await pool.query(
+      `SELECT ${column} FROM leave_balance WHERE employee_id=$1`,
+      [employeeId]
+    );
+
+    const balance = balanceResult.rows[0][column];
+
+    if (balance < days) {
+      return res.status(400).json({
+        error: "Not enough leave balance"
+      });
+    }
+
+    /* APPLY LEAVE */
+
     const result = await pool.query(
       `INSERT INTO leave_requests
       (employee_id, leave_type_id, from_date, to_date, days, reason, status)
@@ -162,8 +171,10 @@ exports.applyLeave = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Apply Leave Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to apply leave" });
+
   }
 
 };
@@ -186,28 +197,29 @@ exports.getMyLeaves = async (req, res) => {
         lr.days,
         lr.status,
         lr.reason,
-        lr.created_at,
         lt.name AS leave_type
        FROM leave_requests lr
        JOIN leave_types lt
        ON lr.leave_type_id = lt.id
        WHERE lr.employee_id=$1
-       ORDER BY lr.created_at DESC`,
+       ORDER BY lr.id DESC`,
       [employeeId]
     );
 
     res.json(result.rows);
 
   } catch (error) {
-    console.error("Get My Leaves Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch leaves" });
+
   }
 
 };
 
 
 
-/* ================= MANAGER VIEW ALL LEAVES ================= */
+/* ================= MANAGER VIEW ================= */
 
 exports.getAllLeaves = async (req, res) => {
 
@@ -221,20 +233,21 @@ exports.getAllLeaves = async (req, res) => {
         lr.days,
         lr.status,
         lr.reason,
-        lr.created_at,
         e.name AS employee_name,
         lt.name AS leave_type
        FROM leave_requests lr
        JOIN employees e ON lr.employee_id=e.id
        JOIN leave_types lt ON lr.leave_type_id=lt.id
-       ORDER BY lr.created_at DESC`
+       ORDER BY lr.id DESC`
     );
 
     res.json(result.rows);
 
   } catch (error) {
-    console.error("Manager Leave List Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch leave requests" });
+
   }
 
 };
@@ -256,6 +269,14 @@ exports.approveLeave = async (req, res) => {
     );
 
     const leave = leaveResult.rows[0];
+
+    if (!leave) {
+      return res.status(404).json({ error: "Leave not found" });
+    }
+
+    if (leave.status !== "Pending") {
+      return res.status(400).json({ error: "Already processed" });
+    }
 
     let column = "";
 
@@ -281,11 +302,13 @@ exports.approveLeave = async (req, res) => {
       [leave.days, leave.employee_id]
     );
 
-    res.json({ message: "Leave approved successfully" });
+    res.json({ message: "Leave approved & balance reduced" });
 
   } catch (error) {
-    console.error("Approve Leave Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to approve leave" });
+
   }
 
 };
@@ -310,11 +333,13 @@ exports.rejectLeave = async (req, res) => {
       [managerId, id]
     );
 
-    res.json({ message: "Leave rejected successfully" });
+    res.json({ message: "Leave rejected" });
 
   } catch (error) {
-    console.error("Reject Leave Error:", error);
+
+    console.error(error);
     res.status(500).json({ error: "Failed to reject leave" });
+
   }
 
 };
