@@ -5,20 +5,13 @@ const pool = require("../db/db");
 // ✅ CHECK IN
 // ======================
 exports.checkIn = async (req, res) => {
-
   try {
+    const employee_id = req.user.id; // from JWT
 
-    const employee_id = req.user.id;
-
-    // Check if already checked in today
+    // Prevent double check-in for same day
     const existing = await pool.query(
-      `
-      SELECT *
-      FROM attendance
-      WHERE employee_id = $1
-      AND date = CURRENT_DATE
-      LIMIT 1
-      `,
+      `SELECT id FROM attendance
+       WHERE employee_id = $1 AND date = CURRENT_DATE`,
       [employee_id]
     );
 
@@ -29,28 +22,18 @@ exports.checkIn = async (req, res) => {
     }
 
     const result = await pool.query(
-      `
-      INSERT INTO attendance (employee_id, date, check_in, status)
-      VALUES (
-        $1,
-        CURRENT_DATE,
-        CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-        'P'
-      )
-      RETURNING *
-      `,
+      `INSERT INTO attendance (employee_id, date, check_in, status)
+       VALUES ($1, CURRENT_DATE, CURRENT_TIME, 'P')
+       RETURNING *`,
       [employee_id]
     );
 
     res.status(201).json(result.rows[0]);
 
   } catch (err) {
-
     console.error(err);
     res.status(500).json({ error: "Server error" });
-
   }
-
 };
 
 
@@ -59,29 +42,21 @@ exports.checkIn = async (req, res) => {
 // ✅ CHECK OUT
 // ======================
 exports.checkOut = async (req, res) => {
-
   try {
-
     const employee_id = req.user.id;
 
     const result = await pool.query(
       `
       UPDATE attendance
       SET 
-        check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-
+        check_out = CURRENT_TIME,
         working_hours = ROUND(
-          EXTRACT(
-            EPOCH FROM (
-              (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') - check_in
-            )
-          ) / 3600,
+          EXTRACT(EPOCH FROM (CURRENT_TIME - check_in)) / 3600,
           2
         )
-
       WHERE employee_id = $1
-      AND date = CURRENT_DATE
-      AND check_out IS NULL
+        AND date = CURRENT_DATE
+        AND check_out IS NULL
       RETURNING *
       `,
       [employee_id]
@@ -96,12 +71,9 @@ exports.checkOut = async (req, res) => {
     res.json(result.rows[0]);
 
   } catch (err) {
-
     console.error(err);
     res.status(500).json({ error: "Server error" });
-
   }
-
 };
 
 
@@ -110,35 +82,23 @@ exports.checkOut = async (req, res) => {
 // ✅ GET MY ATTENDANCE
 // ======================
 exports.getMyAttendance = async (req, res) => {
-
   try {
-
     const employee_id = req.user.id;
 
     const result = await pool.query(
-      `
-      SELECT *
-      FROM attendance
-      WHERE employee_id = $1
-      AND date = CURRENT_DATE
-      LIMIT 1
-      `,
+      `SELECT *
+       FROM attendance
+       WHERE employee_id = $1
+       ORDER BY date DESC`,
       [employee_id]
     );
 
-    if (result.rows.length === 0) {
-      return res.json(null);
-    }
-
-    res.json(result.rows[0]);
+    res.json(result.rows);
 
   } catch (err) {
-
     console.error(err);
     res.status(500).json({ error: "Server error" });
-
   }
-
 };
 
 
@@ -147,33 +107,18 @@ exports.getMyAttendance = async (req, res) => {
 // ✅ ADMIN: GET ALL ATTENDANCE
 // ======================
 exports.getAllAttendance = async (req, res) => {
-
   try {
-
     const result = await pool.query(
-      `
-      SELECT 
-        a.id,
-        a.employee_id,
-        e.name,
-        a.date,
-        a.check_in,
-        a.check_out,
-        a.working_hours,
-        a.status
-      FROM attendance a
-      JOIN employees e ON a.employee_id = e.id
-      ORDER BY a.date DESC
-      `
+      `SELECT a.*, e.name
+       FROM attendance a
+       JOIN employees e ON a.employee_id = e.id
+       ORDER BY a.date DESC`
     );
 
     res.json(result.rows);
 
   } catch (err) {
-
     console.error(err);
     res.status(500).json({ error: "Server error" });
-
   }
-
 };
