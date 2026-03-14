@@ -1,14 +1,12 @@
 const pool = require("../db/db");
 
-
 // ======================
 // ✅ CHECK IN
 // ======================
 exports.checkIn = async (req, res) => {
   try {
-    const employee_id = req.user.id; // from JWT
+    const employee_id = req.user.id;
 
-    // Prevent double check-in for same day
     const existing = await pool.query(
       `SELECT id FROM attendance
        WHERE employee_id = $1 AND date = CURRENT_DATE`,
@@ -16,9 +14,7 @@ exports.checkIn = async (req, res) => {
     );
 
     if (existing.rows.length > 0) {
-      return res.status(400).json({
-        message: "Already checked in today"
-      });
+      return res.status(400).json({ message: "Already checked in today" });
     }
 
     const result = await pool.query(
@@ -29,14 +25,11 @@ exports.checkIn = async (req, res) => {
     );
 
     res.status(201).json(result.rows[0]);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 };
-
-
 
 // ======================
 // ✅ CHECK OUT
@@ -46,19 +39,17 @@ exports.checkOut = async (req, res) => {
     const employee_id = req.user.id;
 
     const result = await pool.query(
-      `
-      UPDATE attendance
-      SET 
-        check_out = CURRENT_TIME,
-        working_hours = ROUND(
-          EXTRACT(EPOCH FROM (CURRENT_TIME - check_in)) / 3600,
-          2
-        )
-      WHERE employee_id = $1
-        AND date = CURRENT_DATE
-        AND check_out IS NULL
-      RETURNING *
-      `,
+      `UPDATE attendance
+       SET 
+         check_out = CURRENT_TIME,
+         working_hours = ROUND(
+           EXTRACT(EPOCH FROM (CURRENT_TIME - check_in)) / 3600,
+           2
+         )
+       WHERE employee_id = $1
+         AND date = CURRENT_DATE
+         AND check_out IS NULL
+       RETURNING *`,
       [employee_id]
     );
 
@@ -69,14 +60,11 @@ exports.checkOut = async (req, res) => {
     }
 
     res.json(result.rows[0]);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 };
-
-
 
 // ======================
 // ✅ GET MY ATTENDANCE
@@ -94,14 +82,11 @@ exports.getMyAttendance = async (req, res) => {
     );
 
     res.json(result.rows);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 };
-
-
 
 // ======================
 // ✅ ADMIN: GET ALL ATTENDANCE
@@ -116,7 +101,6 @@ exports.getAllAttendance = async (req, res) => {
     );
 
     res.json(result.rows);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
