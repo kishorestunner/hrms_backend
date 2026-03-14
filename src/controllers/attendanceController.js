@@ -7,7 +7,6 @@ const pool = require("../db/db");
 exports.checkIn = async (req, res) => {
   try {
     const employee_id = req.user?.id;
-
     if (!employee_id) {
       return res.status(401).json({ message: "Unauthorized" });
     }
@@ -44,12 +43,9 @@ exports.checkIn = async (req, res) => {
 exports.checkOut = async (req, res) => {
   try {
     const employee_id = req.user?.id;
+    if (!employee_id) return res.status(401).json({ message: "Unauthorized" });
 
-    if (!employee_id) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    // Ensure a check-in exists today
+    // Ensure check-in exists today and not checked out
     const existing = await pool.query(
       `SELECT * FROM attendance
        WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL`,
@@ -62,17 +58,15 @@ exports.checkOut = async (req, res) => {
       });
     }
 
-    const checkInTime = existing.rows[0].check_in;
-
-    // Update check-out safely
+    // Calculate working hours using date + check_in
     const result = await pool.query(
       `UPDATE attendance
        SET 
          check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-         working_hours = CASE
-           WHEN check_in IS NOT NULL THEN ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata' - check_in))/3600, 2)
-           ELSE 0
-         END
+         working_hours = ROUND(
+           EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata' - (date + check_in)))/3600,
+           2
+         )
        WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL
        RETURNING *`,
       [employee_id]
@@ -91,10 +85,7 @@ exports.checkOut = async (req, res) => {
 exports.getMyAttendance = async (req, res) => {
   try {
     const employee_id = req.user?.id;
-
-    if (!employee_id) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+    if (!employee_id) return res.status(401).json({ message: "Unauthorized" });
 
     const result = await pool.query(
       `SELECT *
