@@ -41,27 +41,34 @@ exports.checkOut = async (req, res) => {
   try {
     const employee_id = req.user.id;
 
-    // Update check-out time in IST and calculate working hours
-    const result = await pool.query(
-      `UPDATE attendance
-       SET 
-         check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-         working_hours = ROUND(
-           EXTRACT(EPOCH FROM ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') - check_in)) / 3600,
-           2
-         )
-       WHERE employee_id = $1
-         AND date = CURRENT_DATE
-         AND check_out IS NULL
-       RETURNING *`,
+    // Ensure a check-in exists first
+    const existing = await pool.query(
+      `SELECT * FROM attendance
+       WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL`,
       [employee_id]
     );
 
-    if (result.rows.length === 0) {
+    if (existing.rows.length === 0) {
       return res.status(400).json({
         message: "Check-in required first or already checked out",
       });
     }
+
+    const checkInTime = existing.rows[0].check_in;
+
+    // Calculate working hours only if check_in exists
+    const result = await pool.query(
+      `UPDATE attendance
+       SET 
+         check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
+         working_hours = CASE
+           WHEN check_in IS NOT NULL THEN ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata' - check_in))/3600, 2)
+           ELSE NULL
+         END
+       WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL
+       RETURNING *`,
+      [employee_id]
+    );
 
     res.json(result.rows[0]);
   } catch (err) {
