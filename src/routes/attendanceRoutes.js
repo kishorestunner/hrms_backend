@@ -11,6 +11,11 @@ router.put("/checkout", authMiddleware, attendanceController.checkOut);
 router.get("/my", authMiddleware, attendanceController.getMyAttendance);
 
 // Admin route
-router.get("/all", authMiddleware, roleMiddleware("admin"), attendanceController.getAllAttendance);
+router.get(
+  "/all",
+  authMiddleware,
+  roleMiddleware("admin"),
+  attendanceController.getAllAttendance
+);
 
 module.exports = router;
