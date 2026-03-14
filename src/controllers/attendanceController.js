@@ -6,7 +6,11 @@ const pool = require("../db/db");
 // ======================
 exports.checkIn = async (req, res) => {
   try {
-    const employee_id = req.user.id;
+    const employee_id = req.user?.id;
+
+    if (!employee_id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
 
     // Prevent double check-in
     const existing = await pool.query(
@@ -39,9 +43,13 @@ exports.checkIn = async (req, res) => {
 // ======================
 exports.checkOut = async (req, res) => {
   try {
-    const employee_id = req.user.id;
+    const employee_id = req.user?.id;
 
-    // Ensure a check-in exists first
+    if (!employee_id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    // Ensure a check-in exists today
     const existing = await pool.query(
       `SELECT * FROM attendance
        WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL`,
@@ -56,14 +64,14 @@ exports.checkOut = async (req, res) => {
 
     const checkInTime = existing.rows[0].check_in;
 
-    // Calculate working hours only if check_in exists
+    // Update check-out safely
     const result = await pool.query(
       `UPDATE attendance
        SET 
          check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
          working_hours = CASE
            WHEN check_in IS NOT NULL THEN ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata' - check_in))/3600, 2)
-           ELSE NULL
+           ELSE 0
          END
        WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL
        RETURNING *`,
@@ -82,7 +90,11 @@ exports.checkOut = async (req, res) => {
 // ======================
 exports.getMyAttendance = async (req, res) => {
   try {
-    const employee_id = req.user.id;
+    const employee_id = req.user?.id;
+
+    if (!employee_id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
 
     const result = await pool.query(
       `SELECT *
