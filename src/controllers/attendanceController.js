@@ -5,9 +5,9 @@ const pool = require("../db/db");
 // ======================
 exports.checkIn = async (req, res) => {
   try {
-    const employee_id = req.user.id; // from JWT
+    const employee_id = req.user.id;
 
-    // Prevent double check-in for same day
+    // Prevent double check-in for today
     const existing = await pool.query(
       `SELECT id FROM attendance
        WHERE employee_id = $1 AND date = CURRENT_DATE`,
@@ -20,18 +20,12 @@ exports.checkIn = async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO attendance (employee_id, date, check_in, status)
-       VALUES (
-         $1,
-         CURRENT_DATE,
-         CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-         'P'
-       )
+       VALUES ($1, CURRENT_DATE, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata', 'P')
        RETURNING *`,
       [employee_id]
     );
 
     res.status(201).json(result.rows[0]);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -47,14 +41,10 @@ exports.checkOut = async (req, res) => {
 
     const result = await pool.query(
       `UPDATE attendance
-       SET 
-         check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-         working_hours = ROUND(
-           EXTRACT(EPOCH FROM (
-             (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') - check_in
-           )) / 3600,
-           2
-         )
+       SET check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
+           working_hours = ROUND(
+             EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata' - check_in)) / 3600, 2
+           )
        WHERE employee_id = $1
          AND date = CURRENT_DATE
          AND check_out IS NULL
@@ -63,13 +53,10 @@ exports.checkOut = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(400).json({
-        message: "Check-in required first or already checked out"
-      });
+      return res.status(400).json({ message: "Check-in required first or already checked out" });
     }
 
     res.json(result.rows[0]);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -77,7 +64,7 @@ exports.checkOut = async (req, res) => {
 };
 
 // ======================
-// ✅ GET MY ATTENDANCE
+// ✅ GET TODAY'S ATTENDANCE
 // ======================
 exports.getMyAttendance = async (req, res) => {
   try {
@@ -87,12 +74,12 @@ exports.getMyAttendance = async (req, res) => {
       `SELECT *
        FROM attendance
        WHERE employee_id = $1
-       ORDER BY date DESC`,
+         AND date = CURRENT_DATE
+       LIMIT 1`,
       [employee_id]
     );
 
-    res.json(result.rows);
-
+    res.json(result.rows[0] || null);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -100,7 +87,7 @@ exports.getMyAttendance = async (req, res) => {
 };
 
 // ======================
-// ✅ ADMIN: GET ALL ATTENDANCE
+// ✅ GET ALL ATTENDANCE (ADMIN)
 // ======================
 exports.getAllAttendance = async (req, res) => {
   try {
@@ -112,7 +99,6 @@ exports.getAllAttendance = async (req, res) => {
     );
 
     res.json(result.rows);
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
