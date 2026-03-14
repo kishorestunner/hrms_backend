@@ -1,3 +1,4 @@
+// backend/controllers/attendanceController.js
 const pool = require("../db/db");
 
 // ======================
@@ -7,6 +8,7 @@ exports.checkIn = async (req, res) => {
   try {
     const employee_id = req.user.id;
 
+    // Prevent double check-in
     const existing = await pool.query(
       `SELECT id FROM attendance
        WHERE employee_id = $1 AND date = CURRENT_DATE`,
@@ -17,16 +19,17 @@ exports.checkIn = async (req, res) => {
       return res.status(400).json({ message: "Already checked in today" });
     }
 
+    // Insert check-in time in IST
     const result = await pool.query(
       `INSERT INTO attendance (employee_id, date, check_in, status)
-       VALUES ($1, CURRENT_DATE, CURRENT_TIME, 'P')
+       VALUES ($1, CURRENT_DATE, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata', 'P')
        RETURNING *`,
       [employee_id]
     );
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error(err);
+    console.error("Check-in error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -38,12 +41,13 @@ exports.checkOut = async (req, res) => {
   try {
     const employee_id = req.user.id;
 
+    // Update check-out time in IST and calculate working hours
     const result = await pool.query(
       `UPDATE attendance
        SET 
-         check_out = CURRENT_TIME,
+         check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
          working_hours = ROUND(
-           EXTRACT(EPOCH FROM (CURRENT_TIME - check_in)) / 3600,
+           EXTRACT(EPOCH FROM ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') - check_in)) / 3600,
            2
          )
        WHERE employee_id = $1
@@ -55,13 +59,13 @@ exports.checkOut = async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(400).json({
-        message: "Check-in required first or already checked out"
+        message: "Check-in required first or already checked out",
       });
     }
 
     res.json(result.rows[0]);
   } catch (err) {
-    console.error(err);
+    console.error("Check-out error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -83,7 +87,7 @@ exports.getMyAttendance = async (req, res) => {
 
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error("Get My Attendance error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -102,7 +106,7 @@ exports.getAllAttendance = async (req, res) => {
 
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error("Get All Attendance error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
