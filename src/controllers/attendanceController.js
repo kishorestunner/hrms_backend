@@ -9,13 +9,7 @@ exports.checkIn = async (req, res) => {
 
     // Check if already checked in today
     const existing = await pool.query(
-      `
-      SELECT *
-      FROM attendance
-      WHERE employee_id = $1
-      AND date = CURRENT_DATE
-      LIMIT 1
-      `,
+      `SELECT * FROM attendance WHERE employee_id = $1 AND date = CURRENT_DATE LIMIT 1`,
       [employee_id]
     );
 
@@ -24,24 +18,18 @@ exports.checkIn = async (req, res) => {
     }
 
     const result = await pool.query(
-      `
-      INSERT INTO attendance (employee_id, date, check_in, status)
-      VALUES (
-        $1,
-        CURRENT_DATE,
-        CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-        'P'
-      )
-      RETURNING *
-      `,
+      `INSERT INTO attendance (employee_id, date, check_in, status)
+       VALUES ($1, CURRENT_DATE, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata', 'P')
+       RETURNING *`,
       [employee_id]
     );
 
     const row = result.rows[0];
 
+    // Convert timestamps to ISO strings
     res.status(201).json({
       ...row,
-      check_in: row.check_in.toISOString(),
+      check_in: row.check_in ? row.check_in.toISOString() : null,
       check_out: row.check_out ? row.check_out.toISOString() : null,
     });
 
@@ -59,23 +47,12 @@ exports.checkOut = async (req, res) => {
     const employee_id = req.user.id;
 
     const result = await pool.query(
-      `
-      UPDATE attendance
-      SET 
-        check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
-        working_hours = ROUND(
-          EXTRACT(
-            EPOCH FROM (
-              (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') - check_in
-            )
-          ) / 3600,
-          2
-        )
-      WHERE employee_id = $1
-      AND date = CURRENT_DATE
-      AND check_out IS NULL
-      RETURNING *
-      `,
+      `UPDATE attendance
+       SET 
+         check_out = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata',
+         working_hours = ROUND(EXTRACT(EPOCH FROM ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') - check_in))/3600, 2)
+       WHERE employee_id = $1 AND date = CURRENT_DATE AND check_out IS NULL
+       RETURNING *`,
       [employee_id]
     );
 
@@ -89,8 +66,8 @@ exports.checkOut = async (req, res) => {
 
     res.json({
       ...row,
-      check_in: row.check_in.toISOString(),
-      check_out: row.check_out.toISOString(),
+      check_in: row.check_in ? row.check_in.toISOString() : null,
+      check_out: row.check_out ? row.check_out.toISOString() : null,
     });
 
   } catch (err) {
@@ -107,13 +84,7 @@ exports.getMyAttendance = async (req, res) => {
     const employee_id = req.user.id;
 
     const result = await pool.query(
-      `
-      SELECT *
-      FROM attendance
-      WHERE employee_id = $1
-      AND date = CURRENT_DATE
-      LIMIT 1
-      `,
+      `SELECT * FROM attendance WHERE employee_id = $1 AND date = CURRENT_DATE LIMIT 1`,
       [employee_id]
     );
 
@@ -126,42 +97,6 @@ exports.getMyAttendance = async (req, res) => {
       check_in: row.check_in ? row.check_in.toISOString() : null,
       check_out: row.check_out ? row.check_out.toISOString() : null,
     });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// ======================
-// ✅ ADMIN: GET ALL ATTENDANCE
-// ======================
-exports.getAllAttendance = async (req, res) => {
-  try {
-    const result = await pool.query(
-      `
-      SELECT 
-        a.id,
-        a.employee_id,
-        e.name,
-        a.date,
-        a.check_in,
-        a.check_out,
-        a.working_hours,
-        a.status
-      FROM attendance a
-      JOIN employees e ON a.employee_id = e.id
-      ORDER BY a.date DESC
-      `
-    );
-
-    const rows = result.rows.map(row => ({
-      ...row,
-      check_in: row.check_in ? row.check_in.toISOString() : null,
-      check_out: row.check_out ? row.check_out.toISOString() : null,
-    }));
-
-    res.json(rows);
 
   } catch (err) {
     console.error(err);
