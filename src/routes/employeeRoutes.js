@@ -4,17 +4,17 @@ const employeeController = require("../controllers/employeeController");
 const auth = require("../middleware/authMiddleware");
 const role = require("../middleware/roleMiddleware");
 
-// 🔓 View employees (any logged-in user)
+// 🔓 View (any logged-in user)
 router.get("/", auth, employeeController.getEmployees);
 router.get("/:id", auth, employeeController.getEmployeeById);
 
-// 🔒 Admin only
-router.post("/", auth, role(["manager"]), employeeController.addEmployee);
+// ✅ HR + ADMIN → can ADD employee
+router.post("/", auth, role(["admin", "hr"]), employeeController.addEmployee);
 
-// 🔒 Admin + Manager
-router.put("/:id", auth, role(["admin", "manager"]), employeeController.updateEmployee);
+// ✅ ADMIN only → can UPDATE (including password)
+router.put("/:id", auth, role(["admin"]), employeeController.updateEmployee);
 
-// 🔒 Admin only
+// ✅ ADMIN only → DELETE
 router.delete("/:id", auth, role(["admin"]), employeeController.deleteEmployee);
 
 module.exports = router;

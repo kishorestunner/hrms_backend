@@ -3,8 +3,13 @@ const bcrypt = require("bcrypt");
 
 // Generate Employee ID
 const generateEmployeeId = () => {
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return "EMP" + random;
+  return "EMP" + Math.floor(1000 + Math.random() * 9000);
+};
+
+// Remove password from response
+const removePassword = (user) => {
+  const { password, ...rest } = user;
+  return rest;
 };
 
 // Allowed fields for update
@@ -14,6 +19,7 @@ const ALLOWED_FIELDS = [
   "position",
   "salary",
   "password",
+  "role", // ✅ added
   "door_no",
   "street",
   "area",
@@ -30,47 +36,48 @@ const ALLOWED_FIELDS = [
   "status",
 ];
 
-// Get all employees
+
+// ================= GET ALL =================
 exports.getEmployees = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, employee_id, name, email, role, position, salary,
-              door_no, street, area, city, state, pincode,
-              personal_phone, alternate_phone, gender, marital_status,
-              joining_date, department, company_name, status
-       FROM employees
-       ORDER BY id ASC`
-    );
+    const result = await pool.query(`
+      SELECT id, employee_id, name, email, role, position, salary,
+             door_no, street, area, city, state, pincode,
+             personal_phone, alternate_phone, gender, marital_status,
+             joining_date, department, company_name, status
+      FROM employees
+      ORDER BY id ASC
+    `);
+
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// Get employee by ID
+
+// ================= GET BY ID =================
 exports.getEmployeeById = async (req, res) => {
   try {
     const { id } = req.params;
+
     const result = await pool.query(
-      `SELECT id, employee_id, name, email, role, position, salary,
-              door_no, street, area, city, state, pincode,
-              personal_phone, alternate_phone, gender, marital_status,
-              joining_date, department, company_name, status
-       FROM employees
-       WHERE id = $1`,
+      "SELECT * FROM employees WHERE id = $1",
       [id]
     );
 
-    if (result.rows.length === 0)
+    if (!result.rows.length) {
       return res.status(404).json({ message: "Employee not found" });
+    }
 
-    res.json(result.rows[0]);
+    res.json(removePassword(result.rows[0])); // ✅ remove password
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// Add new employee
+
+// ================= ADD =================
 exports.addEmployee = async (req, res) => {
   try {
     const {
@@ -79,35 +86,31 @@ exports.addEmployee = async (req, res) => {
       position,
       salary,
       password,
-      door_no,
-      street,
-      area,
-      city,
-      state,
-      pincode,
-      personal_phone,
-      alternate_phone,
-      gender,
-      marital_status,
-      joining_date,
       department,
-      company_name,
-      status,
+      gender,
     } = req.body;
 
-    if (!name || !email || !position || !salary || !password)
+    if (!name || !email || !position || !salary || !password) {
       return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // ✅ check duplicate email
+    const exists = await pool.query(
+      "SELECT id FROM employees WHERE email = $1",
+      [email]
+    );
+
+    if (exists.rows.length > 0) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
 
     const employeeId = generateEmployeeId();
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
       `INSERT INTO employees
-       (employee_id, name, email, position, salary, password, role,
-        door_no, street, area, city, state, pincode,
-        personal_phone, alternate_phone, gender, marital_status,
-        joining_date, department, company_name, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+       (employee_id, name, email, position, salary, password, role, department, gender, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
         employeeId,
@@ -116,82 +119,89 @@ exports.addEmployee = async (req, res) => {
         position,
         salary,
         hashedPassword,
-        "employee",
-        door_no || null,
-        street || null,
-        area || null,
-        city || null,
-        state || null,
-        pincode || null,
-        personal_phone || null,
-        alternate_phone || null,
-        gender || null,
-        marital_status || null,
-        joining_date || null,
+        "employee", // default role
         department || null,
-        company_name || null,
-        status || "Active",
+        gender || null,
+        "Active",
       ]
     );
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(removePassword(result.rows[0])); // ✅ safe response
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// Update employee by ID
+
+// ================= UPDATE =================
 exports.updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
     let fields = req.body;
 
-    // Only allow specific fields
+    // allow only valid fields
     fields = Object.fromEntries(
-      Object.entries(fields).filter(([key]) => ALLOWED_FIELDS.includes(key))
+      Object.entries(fields).filter(([key]) =>
+        ALLOWED_FIELDS.includes(key)
+      )
     );
 
-    if (Object.keys(fields).length === 0)
+    if (!Object.keys(fields).length) {
       return res.status(400).json({ message: "No valid fields to update" });
+    }
 
-    // Hash password if updating
+    // hash password if exists
     if (fields.password) {
       fields.password = await bcrypt.hash(fields.password, 10);
     }
 
-    // Build dynamic SET clause
+    // normalize role
+    if (fields.role) {
+      fields.role = fields.role.toLowerCase();
+    }
+
     const setClause = Object.keys(fields)
-      .map((key, idx) => `${key} = $${idx + 1}`)
-      .join(", ");
+      .map((key, i) => `${key}=$${i + 1}`)
+      .join(",");
+
     const values = Object.values(fields);
 
     const result = await pool.query(
-      `UPDATE employees SET ${setClause} WHERE id = $${values.length + 1} RETURNING *`,
+      `UPDATE employees SET ${setClause}
+       WHERE id=$${values.length + 1}
+       RETURNING *`,
       [...values, id]
     );
 
-    if (result.rows.length === 0)
+    if (!result.rows.length) {
       return res.status(404).json({ message: "Employee not found" });
+    }
 
-    res.json(result.rows[0]);
+    res.json(removePassword(result.rows[0])); // ✅ safe
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// Delete employee by ID
+
+// ================= DELETE =================
 exports.deleteEmployee = async (req, res) => {
   try {
     const { id } = req.params;
+
     const result = await pool.query(
-      "DELETE FROM employees WHERE id = $1 RETURNING *",
+      "DELETE FROM employees WHERE id=$1 RETURNING *",
       [id]
     );
 
-    if (result.rows.length === 0)
+    if (!result.rows.length) {
       return res.status(404).json({ message: "Employee not found" });
+    }
 
-    res.json({ message: "Employee deleted successfully", employee: result.rows[0] });
+    res.json({
+      message: "Employee deleted successfully",
+      employee: removePassword(result.rows[0]), // ✅ safe
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
