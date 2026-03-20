@@ -4,38 +4,20 @@ const router = express.Router();
 const leaveController = require("../controllers/leaveController");
 const authMiddleware = require("../middleware/authMiddleware");
 
-
-/* ================= LEAVE TYPES ================= */
-
+/* ================= TYPES ================= */
 router.get("/types", authMiddleware, leaveController.getLeaveTypes);
 
-
-/* ================= LEAVE BALANCE ================= */
-
+/* ================= BALANCE ================= */
 router.post("/add-balance", authMiddleware, leaveController.addLeaveBalance);
-
-router.put("/update-balance", authMiddleware, leaveController.updateLeaveBalance);
-
 router.get("/balance", authMiddleware, leaveController.getLeaveBalance);
 
-
-/* ================= APPLY LEAVE ================= */
-
+/* ================= APPLY ================= */
 router.post("/apply", authMiddleware, leaveController.applyLeave);
 
-
-/* ================= EMPLOYEE LEAVE ================= */
-
+/* ================= MY LEAVES ================= */
 router.get("/my-leaves", authMiddleware, leaveController.getMyLeaves);
 
-
-/* ================= MANAGER ================= */
-
-router.get("/all", authMiddleware, leaveController.getAllLeaves);
-
+/* ================= APPROVAL ================= */
 router.put("/approve/:id", authMiddleware, leaveController.approveLeave);
-
-router.put("/reject/:id", authMiddleware, leaveController.rejectLeave);
-
 
 module.exports = router;
