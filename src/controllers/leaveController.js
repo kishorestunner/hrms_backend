@@ -17,6 +17,7 @@ exports.getLeaveTypes = async (req, res) => {
   }
 };
 
+
 /* ================= ADD LEAVE BALANCE ================= */
 exports.addLeaveBalance = async (req, res) => {
   try {
@@ -30,14 +31,48 @@ exports.addLeaveBalance = async (req, res) => {
       [employee_id, casual, sick, paid, comp, lop]
     );
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({
+      message: "Leave balance added",
+      data: result.rows[0]
+    });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to add leave balance" });
   }
 };
 
-/* ================= GET BALANCE ================= */
+
+/* ================= UPDATE LEAVE BALANCE ================= */
+exports.updateLeaveBalance = async (req, res) => {
+  try {
+    const { employee_id, casual, sick, paid, comp, lop } = req.body;
+
+    const result = await pool.query(
+      `UPDATE leave_balance
+       SET casual=$1,
+           sick=$2,
+           paid=$3,
+           comp=$4,
+           lop=$5
+       WHERE employee_id=$6
+       RETURNING *`,
+      [casual, sick, paid, comp, lop, employee_id]
+    );
+
+    res.json({
+      message: "Leave balance updated",
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update leave balance" });
+  }
+};
+
+
+/* ================= GET LEAVE BALANCE ================= */
 exports.getLeaveBalance = async (req, res) => {
   try {
     const employeeId = req.user.id;
@@ -49,11 +84,18 @@ exports.getLeaveBalance = async (req, res) => {
       [employeeId]
     );
 
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Leave balance not found" });
+    }
+
     res.json(result.rows[0]);
+
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch leave balance" });
   }
 };
+
 
 /* ================= APPLY LEAVE ================= */
 exports.applyLeave = async (req, res) => {
@@ -80,10 +122,16 @@ exports.applyLeave = async (req, res) => {
       [employeeId]
     );
 
-    const balance = balanceResult.rows[0]?.[column] || 0;
+    if (balanceResult.rows.length === 0) {
+      return res.status(404).json({ error: "Leave balance not found" });
+    }
+
+    const balance = balanceResult.rows[0][column];
 
     if (balance < days) {
-      return res.status(400).json({ error: "Not enough leave balance" });
+      return res.status(400).json({
+        error: "Not enough leave balance"
+      });
     }
 
     const result = await pool.query(
@@ -94,7 +142,10 @@ exports.applyLeave = async (req, res) => {
       [employeeId, leave_type_id, from_date, to_date, days, reason]
     );
 
-    res.json(result.rows[0]);
+    res.status(201).json({
+      message: "Leave applied successfully",
+      data: result.rows[0]
+    });
 
   } catch (error) {
     console.error(error);
@@ -102,7 +153,8 @@ exports.applyLeave = async (req, res) => {
   }
 };
 
-/* ================= GET MY LEAVES (IMPORTANT) ================= */
+
+/* ================= MY LEAVES (🔥 IMPORTANT FIX) ================= */
 exports.getMyLeaves = async (req, res) => {
   try {
     const employeeId = req.user.id;
@@ -114,36 +166,69 @@ exports.getMyLeaves = async (req, res) => {
         lr.to_date,
         lr.days,
         lr.status,
-        lt.code AS leave_type   -- ✅ THIS IS IMPORTANT
+        lr.reason,
+        lt.code AS leave_type   -- ✅ IMPORTANT (CL, SL, PL)
        FROM leave_requests lr
        JOIN leave_types lt ON lr.leave_type_id = lt.id
-       WHERE lr.employee_id=$1`,
+       WHERE lr.employee_id=$1
+       ORDER BY lr.id DESC`,
       [employeeId]
     );
 
     res.json(result.rows);
+
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch leaves" });
   }
 };
+
+
+/* ================= MANAGER VIEW ================= */
+exports.getAllLeaves = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        lr.id,
+        lr.from_date,
+        lr.to_date,
+        lr.days,
+        lr.status,
+        lr.reason,
+        e.name AS employee_name,
+        lt.code AS leave_type
+       FROM leave_requests lr
+       JOIN employees e ON lr.employee_id=e.id
+       JOIN leave_types lt ON lr.leave_type_id=lt.id
+       ORDER BY lr.id DESC`
+    );
+
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch leave requests" });
+  }
+};
+
 
 /* ================= APPROVE ================= */
 exports.approveLeave = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const leave = await pool.query(
+    const leaveResult = await pool.query(
       `SELECT * FROM leave_requests WHERE id=$1`,
       [id]
     );
 
-    const data = leave.rows[0];
+    const leave = leaveResult.rows[0];
 
-    if (!data) {
+    if (!leave) {
       return res.status(404).json({ error: "Leave not found" });
     }
 
-    if (data.status !== "Pending") {
+    if (leave.status !== "Pending") {
       return res.status(400).json({ error: "Already processed" });
     }
 
@@ -155,10 +240,12 @@ exports.approveLeave = async (req, res) => {
       5: "lop"
     };
 
-    const column = columnMap[data.leave_type_id];
+    const column = columnMap[leave.leave_type_id];
 
     await pool.query(
-      `UPDATE leave_requests SET status='Approved' WHERE id=$1`,
+      `UPDATE leave_requests
+       SET status='Approved'
+       WHERE id=$1`,
       [id]
     );
 
@@ -166,12 +253,34 @@ exports.approveLeave = async (req, res) => {
       `UPDATE leave_balance
        SET ${column} = ${column} - $1
        WHERE employee_id=$2`,
-      [data.days, data.employee_id]
+      [leave.days, leave.employee_id]
     );
 
-    res.json({ message: "Approved" });
+    res.json({ message: "Leave approved" });
 
   } catch (error) {
-    res.status(500).json({ error: "Failed" });
+    console.error(error);
+    res.status(500).json({ error: "Failed to approve leave" });
+  }
+};
+
+
+/* ================= REJECT ================= */
+exports.rejectLeave = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await pool.query(
+      `UPDATE leave_requests
+       SET status='Rejected'
+       WHERE id=$1`,
+      [id]
+    );
+
+    res.json({ message: "Leave rejected" });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to reject leave" });
   }
 };
