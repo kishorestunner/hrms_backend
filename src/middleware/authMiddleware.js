@@ -1,29 +1,25 @@
 const jwt = require("jsonwebtoken");
 
 const authMiddleware = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  // Check token exists
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Token missing" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
   try {
-    const authHeader = req.headers.authorization;
-
-    // ✅ Check token exists
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Token missing" });
-    }
-
-    const token = authHeader.split(" ")[1];
-
-    // ✅ Verify token
+    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // ✅ Attach user
-    req.user = decoded;
+    // Attach user to request
+    req.user = decoded; // { id, role, name }
 
-    next();
-
+    next(); // continue to controller
   } catch (err) {
-    // 🔥 Better error handling
-    return res.status(401).json({
-      message: "Invalid or expired token",
-    });
+    return res.status(401).json({ message: "Invalid token" });
   }
 };
 

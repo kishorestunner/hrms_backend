@@ -7,10 +7,7 @@ const roleMiddleware = (allowedRoles = []) => {
 
       const userRole = req.user.role.toLowerCase();
 
-      // ✅ convert allowedRoles also to lowercase
-      const normalizedRoles = allowedRoles.map(r => r.toLowerCase());
-
-      if (!normalizedRoles.includes(userRole)) {
+      if (!allowedRoles.includes(userRole)) {
         return res.status(403).json({
           message: `Access denied for role: ${userRole}`,
         });
