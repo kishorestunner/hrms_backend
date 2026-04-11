@@ -1,22 +1,50 @@
 const pool = require("../db/db");
 const bcrypt = require("bcrypt");
 
-// ---------------- UTIL ----------------
+// Generate Employee ID
+const generateEmployeeId = () => {
+  return "EMP" + Math.floor(1000 + Math.random() * 9000);
+};
+
+// Remove password from response
 const removePassword = (user) => {
   const { password, ...rest } = user;
   return rest;
 };
 
-const generateEmployeeId = () => {
-  return "EMP" + Math.floor(1000 + Math.random() * 9000);
-};
+// Allowed fields for update
+const ALLOWED_FIELDS = [
+  "name",
+  "email",
+  "position",
+  "salary",
+  "password",
+  "role", // ✅ added
+  "door_no",
+  "street",
+  "area",
+  "city",
+  "state",
+  "pincode",
+  "personal_phone",
+  "alternate_phone",
+  "gender",
+  "marital_status",
+  "joining_date",
+  "department",
+  "company_name",
+  "status",
+];
 
-// ---------------- GET ALL EMPLOYEES (ADMIN/HR) ----------------
+
+// ================= GET ALL =================
 exports.getEmployees = async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, employee_id, name, email, role, position, salary,
-             city, state, department, status
+             door_no, street, area, city, state, pincode,
+             personal_phone, alternate_phone, gender, marital_status,
+             joining_date, department, company_name, status
       FROM employees
       ORDER BY id ASC
     `);
@@ -27,10 +55,11 @@ exports.getEmployees = async (req, res) => {
   }
 };
 
-// ---------------- GET OWN PROFILE (/me ONLY) ----------------
+
+// ================= GET BY ID =================
 exports.getEmployeeById = async (req, res) => {
   try {
-    const id = req.user.id; // 🔥 ALWAYS SELF (NO /:id confusion)
+    const { id } = req.params;
 
     const result = await pool.query(
       "SELECT * FROM employees WHERE id = $1",
@@ -41,23 +70,33 @@ exports.getEmployeeById = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    res.json(removePassword(result.rows[0]));
+    res.json(removePassword(result.rows[0])); // ✅ remove password
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ---------------- ADD EMPLOYEE ----------------
+
+// ================= ADD =================
 exports.addEmployee = async (req, res) => {
   try {
-    const { name, email, position, salary, password, department, gender } = req.body;
+    const {
+      name,
+      email,
+      position,
+      salary,
+      password,
+      department,
+      gender,
+    } = req.body;
 
     if (!name || !email || !position || !salary || !password) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // ✅ check duplicate email
     const exists = await pool.query(
-      "SELECT id FROM employees WHERE email=$1",
+      "SELECT id FROM employees WHERE email = $1",
       [email]
     );
 
@@ -65,8 +104,8 @@ exports.addEmployee = async (req, res) => {
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
     const employeeId = generateEmployeeId();
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
       `INSERT INTO employees
@@ -80,46 +119,56 @@ exports.addEmployee = async (req, res) => {
         position,
         salary,
         hashedPassword,
-        "employee",
+        "employee", // default role
         department || null,
         gender || null,
         "Active",
       ]
     );
 
-    res.status(201).json(removePassword(result.rows[0]));
+    res.status(201).json(removePassword(result.rows[0])); // ✅ safe response
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ---------------- UPDATE PROFILE (/me or /:id admin) ----------------
+
+// ================= UPDATE =================
 exports.updateEmployee = async (req, res) => {
   try {
-    let id = req.user.id;
-
-    if (req.user.role === "admin" && req.params.id) {
-      id = req.params.id;
-    }
-
+    const { id } = req.params;
     let fields = req.body;
 
+    // allow only valid fields
+    fields = Object.fromEntries(
+      Object.entries(fields).filter(([key]) =>
+        ALLOWED_FIELDS.includes(key)
+      )
+    );
+
+    if (!Object.keys(fields).length) {
+      return res.status(400).json({ message: "No valid fields to update" });
+    }
+
+    // hash password if exists
     if (fields.password) {
       fields.password = await bcrypt.hash(fields.password, 10);
     }
 
-    const keys = Object.keys(fields);
-    const values = Object.values(fields);
-
-    if (!keys.length) {
-      return res.status(400).json({ message: "No data to update" });
+    // normalize role
+    if (fields.role) {
+      fields.role = fields.role.toLowerCase();
     }
 
-    const setQuery = keys.map((k, i) => `${k}=$${i + 1}`).join(",");
+    const setClause = Object.keys(fields)
+      .map((key, i) => `${key}=$${i + 1}`)
+      .join(",");
+
+    const values = Object.values(fields);
 
     const result = await pool.query(
-      `UPDATE employees SET ${setQuery}
-       WHERE id=$${keys.length + 1}
+      `UPDATE employees SET ${setClause}
+       WHERE id=$${values.length + 1}
        RETURNING *`,
       [...values, id]
     );
@@ -128,13 +177,14 @@ exports.updateEmployee = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    res.json(removePassword(result.rows[0]));
+    res.json(removePassword(result.rows[0])); // ✅ safe
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ---------------- DELETE (ADMIN ONLY) ----------------
+
+// ================= DELETE =================
 exports.deleteEmployee = async (req, res) => {
   try {
     const { id } = req.params;
@@ -148,7 +198,10 @@ exports.deleteEmployee = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    res.json({ message: "Deleted successfully" });
+    res.json({
+      message: "Employee deleted successfully",
+      employee: removePassword(result.rows[0]), // ✅ safe
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

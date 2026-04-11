@@ -6,7 +6,9 @@ const roleMiddleware = (allowedRoles = []) => {
       }
 
       const userRole = req.user.role.toLowerCase();
-      const normalizedRoles = allowedRoles.map((r) => r.toLowerCase());
+
+      // ✅ convert allowedRoles also to lowercase
+      const normalizedRoles = allowedRoles.map(r => r.toLowerCase());
 
       if (!normalizedRoles.includes(userRole)) {
         return res.status(403).json({
@@ -16,7 +18,7 @@ const roleMiddleware = (allowedRoles = []) => {
 
       next();
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      return res.status(500).json({ message: err.message });
     }
   };
 };
