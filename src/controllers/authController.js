@@ -6,7 +6,6 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // ✅ FIXED QUERY
     const result = await pool.query(
       "SELECT * FROM employees WHERE email = $1",
       [email]
@@ -28,7 +27,7 @@ exports.login = async (req, res) => {
       {
         id: user.id,
         role: user.role,
-        name: user.name
+        name: user.name,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
@@ -38,9 +37,8 @@ exports.login = async (req, res) => {
       id: user.id,
       name: user.name,
       role: user.role,
-      token
+      token,
     });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
