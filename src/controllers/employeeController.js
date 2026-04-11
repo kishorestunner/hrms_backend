@@ -19,7 +19,7 @@ const ALLOWED_FIELDS = [
   "position",
   "salary",
   "password",
-  "role", // ✅ added
+  "role",
   "door_no",
   "street",
   "area",
@@ -36,8 +36,7 @@ const ALLOWED_FIELDS = [
   "status",
 ];
 
-
-// ================= GET ALL =================
+// ================= GET ALL (ADMIN / HR) =================
 exports.getEmployees = async (req, res) => {
   try {
     const result = await pool.query(`
@@ -55,11 +54,18 @@ exports.getEmployees = async (req, res) => {
   }
 };
 
-
-// ================= GET BY ID =================
+// ================= GET OWN PROFILE =================
 exports.getEmployeeById = async (req, res) => {
   try {
-    const { id } = req.params;
+    let id;
+
+    // 🔥 If admin → allow param id
+    if (req.user.role === "admin" && req.params.id) {
+      id = req.params.id;
+    } else {
+      // 🔐 Employee → own ID from token
+      id = req.user.id;
+    }
 
     const result = await pool.query(
       "SELECT * FROM employees WHERE id = $1",
@@ -70,14 +76,13 @@ exports.getEmployeeById = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    res.json(removePassword(result.rows[0])); // ✅ remove password
+    res.json(removePassword(result.rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-
-// ================= ADD =================
+// ================= ADD EMPLOYEE =================
 exports.addEmployee = async (req, res) => {
   try {
     const {
@@ -94,7 +99,7 @@ exports.addEmployee = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // ✅ check duplicate email
+    // Check duplicate email
     const exists = await pool.query(
       "SELECT id FROM employees WHERE email = $1",
       [email]
@@ -119,27 +124,35 @@ exports.addEmployee = async (req, res) => {
         position,
         salary,
         hashedPassword,
-        "employee", // default role
+        "employee",
         department || null,
         gender || null,
         "Active",
       ]
     );
 
-    res.status(201).json(removePassword(result.rows[0])); // ✅ safe response
+    res.status(201).json(removePassword(result.rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-
 // ================= UPDATE =================
 exports.updateEmployee = async (req, res) => {
   try {
-    const { id } = req.params;
+    let id;
+
+    // 🔥 ADMIN → can update any user
+    if (req.user.role === "admin" && req.params.id) {
+      id = req.params.id;
+    } else {
+      // 🔐 Employee → only own profile
+      id = req.user.id;
+    }
+
     let fields = req.body;
 
-    // allow only valid fields
+    // Allow only valid fields
     fields = Object.fromEntries(
       Object.entries(fields).filter(([key]) =>
         ALLOWED_FIELDS.includes(key)
@@ -150,12 +163,12 @@ exports.updateEmployee = async (req, res) => {
       return res.status(400).json({ message: "No valid fields to update" });
     }
 
-    // hash password if exists
+    // Hash password if exists
     if (fields.password) {
       fields.password = await bcrypt.hash(fields.password, 10);
     }
 
-    // normalize role
+    // Normalize role
     if (fields.role) {
       fields.role = fields.role.toLowerCase();
     }
@@ -177,12 +190,11 @@ exports.updateEmployee = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    res.json(removePassword(result.rows[0])); // ✅ safe
+    res.json(removePassword(result.rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
-
 
 // ================= DELETE =================
 exports.deleteEmployee = async (req, res) => {
@@ -200,7 +212,7 @@ exports.deleteEmployee = async (req, res) => {
 
     res.json({
       message: "Employee deleted successfully",
-      employee: removePassword(result.rows[0]), // ✅ safe
+      employee: removePassword(result.rows[0]),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
